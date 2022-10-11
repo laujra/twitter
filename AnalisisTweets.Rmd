@@ -1,0 +1,373 @@
+---
+title: "Tratamiento de tweets"
+author: "Laura Andrea Nieto Osorio"
+date: "2022-09-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Configuración del entorno
+```{r }
+getwd() #Ver directorio de trabajo actual
+#setwd('C:/Users/lnieto/Documents/R') #Configurar directorio que se usara
+getwd() #Ver que si se cambio el directorio
+rm(list=ls()) #Limpieza de los objetos existentes
+
+# install.packages(c("readxl","stringr","lubridate","dplyr","tidytext",
+#                    "janeaustenr","ggplot2","wordcloud","syuzhet","tm",
+#                   "tidyr","igraph","ggraph","RColorBrewer", "tidyverse",
+#                   "stm","quanteda","qdapRegex")) #Instalación librerias
+library(readxl) #Leer excel
+library(stringr) #manipulación
+library(lubridate) #manipulación
+library(dplyr) #manipulación 
+library(tidytext) #manipulación
+library(ggplot2) #Graficas
+library(wordcloud) #Nube de palabras
+library(syuzhet) #Análisis de sentimientos
+library(tidyr) #manipulación
+library(igraph) #Graficas
+library(ggraph) #Graficas
+library(tm) #Text mining
+library(RColorBrewer) #Paletas de colores
+library(widyr) #manipulación
+library(tidyverse) #Cargar librerías
+```
+
+## Lectura del archivo y limpieza
+
+```{r}
+DF<-read_xlsx('tuits.xlsx') #Carga DF
+tuits.df<-as.data.frame(DF$text) #Extraer columnas de tweets
+
+#Eliminar links, carácteres especiales, dejar todo en minúsculas y eliminar espacios dobles vacíos
+tuits.df.limpio<-apply(tuits.df,1,function(x) gsub(" ?(f|ht)(tp)(s?)(://)(.*)","",x))
+tuits.df.limpio<-gsub("\n"," ",tuits.df.limpio)
+tuits.df.limpio<-str_to_lower(tuits.df.limpio)
+tuits.df.limpio<-str_replace_all(tuits.df.limpio,"[^a-záéíóúüñ#@ ]"," ")
+tuits.df.limpio<-str_squish(tuits.df.limpio)
+
+DF$text<-tuits.df.limpio #Reemplazar los tweets anteriores por los limpios
+
+
+head(DF,10)
+```
+## Tokenización y Stopwords
+
+```{r}
+
+tidy_tuits=DF%>%
+  unnest_tokens(tbl= .,output = word,input=text) #Tokenización (Una palabra por fila)
+
+stop_words<-c(tm::stopwords("spanish"),"q","ud", "tan", "van","allá","acá", "cómo","m","da","mas","col","pgn","ma","s","mientras","usted","si",
+              "pues","hace","hola","d","t", "l", "sr", "qu","pa", "vos", "ve", "c",
+              "t","p","r") #Definir las stopwords a usar
+tidy_tuits<-tidy_tuits %>% filter(!(word %in% stop_words)) #Eliminar las stopwords de nuestros datos
+
+```
+
+### Usuarios que más twitean
+
+```{r}
+
+users<-DF %>% count(screenName,sort=TRUE) #Conteo por 'screenName' (Usuario)
+users %>% 
+    top_n(20) %>%
+    ggplot(aes(x=screenName,y=n, fill=screenName))+
+    geom_bar(stat = "identity")+
+    coord_flip()+theme(
+  legend.position="none") #Barplot por número n de tweets por usuario
+
+```
+
+### Tweets por zona
+
+
+```{r}
+
+
+zonas<-DF %>% count(zona,sort=TRUE) #Conteo por Zona 
+zonas %>% 
+    top_n(10) %>%
+    ggplot(aes(x=zona,y=n, fill=zona))+
+    geom_bar(stat = "identity")+
+    coord_flip()+theme(
+  legend.position="none") #Barplot por número n de tweets por Zona
+
+```
+
+
+### Tweets por día
+
+
+```{r}
+DF$dia<-str_sub(DF$created,1,10)  #Extraer los carácteres con el día de la columna 'created
+dias<-DF %>% count(dia,sort=TRUE) #Conteo por día
+dias$nombredia<-c("Jueves 22", "Miercoles 21", "Viernes 23", "Jueves 15", "Martes 20", "Lunes 19", "Viernes 16","Sábado 17", "Domingo 18", "Miércoles 14") #Poner las etiquedas de los días
+dias %>% 
+    top_n(10) %>%
+    ggplot(aes(x=nombredia,y=n, fill=dia))+
+    geom_bar(stat = "identity")+
+    coord_flip()+theme(
+  legend.position="none")  #Barplot por número n de tweets por día
+
+
+```
+
+### Tweets por franja horario
+
+
+```{r}
+DF$hora<-str_sub(DF$created,12,13) #Extraer los carácteres con la hora de la columna 'created
+hora<-DF %>% count(hora,sort=TRUE) #Conteo por hora
+
+hora %>%
+    ggplot(aes(x=hora,y=n, fill=hora))+
+    geom_bar(stat = "identity")+theme(
+  legend.position="none") #Barplot por número n de tweets por hora
+
+
+```
+```{r}
+DF$hora<-as.numeric(DF$hora) #Convertir a numero los caracteres
+madrugada<-subset(DF, hora %in% c(3,4,5,6,7)) #Filtrar por horas de la madrugada
+usersm<-madrugada %>% count(screenName,sort=TRUE) #Conteo por horas
+usersm %>% 
+    top_n(10) %>%
+    ggplot(aes(x=screenName,y=n, fill=screenName))+
+    geom_bar(stat = "identity")+
+    coord_flip()+theme(
+  legend.position="none") #Barplot por número n de tweets por hora en la madrugada
+```
+
+
+## Wordcloud pais completo
+
+```{r}
+
+ord<-tidy_tuits %>% count(word,sort=TRUE) #Contar el número de veces que aparece cada palabra y ordenarlas según el conteo
+ord<-ord[-(1:2),] #Eliminar los dos primeros que en este caso eran las menciones al alcalde y la alcaldía
+
+ord %>% with(wordcloud(word, n, max.words = 200, random.order = FALSE, random.color = TRUE, colors=rainbow(5),scale=c(4,.5))) #Generar wordcloud con máximo 200 palabras, colores aleatorios tomados de la paleta rainbow
+
+```
+
+### Representación en barras
+
+```{r}
+ord %>% 
+    top_n(20) %>%
+    ggplot(aes(x=word,y=n, fill=word))+
+    geom_bar(stat = "identity")+
+    coord_flip()+theme(legend.position="none") #barplot según el número n de veces que aparece una palabra
+```
+
+## Análisis de sentimientos
+
+```{r}
+texto_palabras<-tidy_tuits$word #Extraer la columna con las palabras 
+#sentimientos_df <- get_nrc_sentiment(texto_palabras, lang="spanish") #Realizar el análisis de sentimientos, SE DEMORA MUCHO POR ESO ESTÁ COMENTADO
+#sentimientos_df<-cbind(tidy_tuits, sentimientosdf)#Unir dataframe original con sentimientos
+
+#writexl::write_xlsx(sentimientos_df,'DFsenti.xlsx') #Guardar el dataframe de sentimientos ya que se demora mucho
+sentimientos_df<-read_xlsx('DFsenti.xlsx') #Cargar el DF de sentimientos (No es necesario si es la primera vez que se crea)
+
+barplot(
+  colSums(prop.table(sentimientos_df[18:25])), #Seleccionar columnas con los sentimientos
+  space = 0.2,
+  horiz = FALSE,
+  las = 1,
+  cex.names = 0.7,
+  col = brewer.pal(n = 8, name = "Set3"),
+  main = "Tweets dirigidos a la alcaldia de Cali",
+  sub = "Análisis realizado usando la libreria Syuzhet",
+  xlab="emociones", ylab = NULL) #barplot de los sentimientos encontrados en las palabras
+```
+
+### Nube de emociones
+
+```{r}
+nube_emociones_vector <- c(
+  paste(texto_palabras[sentimientos_df$sadness> 0], collapse = " "),
+  paste(texto_palabras[sentimientos_df$joy > 0], collapse = " "),
+  paste(texto_palabras[sentimientos_df$anger > 0], collapse = " "),
+  paste(texto_palabras[sentimientos_df$fear > 0], collapse = " ")) #Filtrar los sentimientos utilizados en las polaridades
+nube_corpus <- Corpus(VectorSource(nube_emociones_vector)) #Definir el corpus
+nube_tdm <- TermDocumentMatrix(nube_corpus) #Calcular la matriz de terminos en el documento
+nube_tdm <- as.matrix(nube_tdm) #Convertir el objeto tdm a matriz
+colnames(nube_tdm) <- c('tristeza', 'felicidad', 'enfado', 'confianza') #renombrar las columnas
+set.seed(757) # puede ser cualquier número (La funcion genera de manera aleatoria la nube, entonces la semilla se define para poder replicar el resultado)
+comparison.cloud(nube_tdm, random.order = FALSE,
+                 colors = c("green", "red", "orange", "blue"), #Colores a usar
+                 title.size = 1, max.words = 50, scale = c(2.5, 1), rot.per = 0.4) #Generar la nube con máximo 50 palabras
+```
+
+### Nube negativo - positivo
+
+```{r}
+nube_emociones_vectornp <- c(
+  paste(texto_palabras[sentimientos_df$positive > 0], collapse = " "),
+  paste(texto_palabras[sentimientos_df$negative > 0], collapse = " ")) #Filtrar unicamente los sentimientos negativos y positivos
+nube_corpusnp <- Corpus(VectorSource(nube_emociones_vectornp)) #Generar corpus
+nube_tdmnp <- TermDocumentMatrix(nube_corpusnp) #Generar tdm
+nube_tdmnp <- as.matrix(nube_tdmnp) #Convertir a matriz
+nube_tdmnp<-nube_tdmnp[-705,] #Eliminar termino conflicto
+colnames(nube_tdmnp) <- c('Positivos', 'Negativos') #Nombres columnas
+set.seed(757) # puede ser cualquier número (La funcion genera de manera aleatoria la nube, entonces la semilla se define para poder replicar el resultado)
+comparison.cloud(nube_tdmnp, random.order = FALSE,
+                 colors = c("green", "red", "orange", "blue"),
+                 title.size = 1, max.words = 50, scale = c(2.5, 1), rot.per =0.4)
+```
+
+## Wordcloud de hashtags de todo el país
+
+
+```{r}
+names(tuits.df)<-"text" #Renombrar
+hasht<-as.data.frame( unlist(str_extract_all(tuits.df$text, '#\\w+'))) #Extraer todas los carácteres que empiezan por #, (hashtags)
+names(hasht)<-"word" #Renombar
+hasht%>% count(word,sort=TRUE)%>%  #Conteo de las veces que aparecen los hashtags
+  with(wordcloud(word, n, max.words = 200, random.order = FALSE, random.color = TRUE, colors=rainbow(5),scale=c(2,.5)))   #Generación nube de palabras
+
+```
+
+## Análisis de asociación entre palabras
+
+### Bigrama
+
+```{r}
+bigramas<-DF %>%
+  unnest_tokens(bigram, text, token = "ngrams", n = 2) #Generar columna de palabras que aparecen juntas
+bigramas_separado<-bigramas %>% separate(bigram, c("word1","word2"),sep=" ") #Separar la columna en dos (Una para cada palabra del bigrana)
+bigramas_separado<-bigramas_separado%>%
+  filter(!word1 %in% stop_words) %>%
+  filter(!word2 %in% stop_words) #Eliminar stopwords
+bigramas<-bigramas_separado %>% summarise(bigram=str_c(word1,word2,sep=" "))  # Guardar columna de bigramas unidos sin stop words
+bigramas %>% count(bigram, sort=TRUE) %>% head(n=20) #Conteo repeticiones
+```
+
+```{r}
+
+bigram_graph <- bigramas_separado %>% count(word1, word2, sort = TRUE) %>% filter(n > 55) %>% graph_from_data_frame() #Grafica a partir del conteo, para los que aparecen más de 55 veces
+set.seed(1) # Semilla para reproducibilidad
+a <- grid::arrow(type = "closed", length = unit(.15, "inches")) #descripción de qué flechas agregar a una línea
+
+ggraph(bigram_graph, layout = "fr") + #Iniciar bigrama
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE, 
+                 arrow = a, end_cap = circle(.05, 'inches')) + #Agregar lineas
+  geom_node_point(color = "lightblue", size = 3) +  #Agregar nodos
+  geom_node_text(aes(label = name), vjust = .05, hjust = .05) + #Agregar etiquetas
+  theme_void() #Tema
+```
+
+### Trigramas
+
+```{r}
+trigrams_filtered<-DF%>%
+  unnest_tokens(trigram, text, token = "ngrams", n = 3) %>% #Generar columna de palabras que aparecen juntas
+  separate(trigram, c("word1", "word2", "word3"), sep = " ") %>% #Separarlas
+  filter(!word1 %in% stop_words,
+         !word2 %in% stop_words,
+         !word3 %in% stop_words) %>% #Quitar stopwords
+  count(word1, word2, word3, sort = TRUE) #Conteo
+trigrams_filtered<-trigrams_filtered[-2,] #Quitar fila con NA
+
+trigramaaas<-data.frame(cbind(str_c(trigrams_filtered$word1,
+                                    trigrams_filtered$word2,
+                                    trigrams_filtered$word3,sep=" "),
+                              trigrams_filtered$n))  #Pegar columnas de conteo y palabras separadas por columna
+trigramaaas$X2<-as.numeric(trigramaaas$X2)
+trigramaaas %>% 
+    top_n(15) %>% #Tomar 15 primeros
+    ggplot(aes(x=X1,y=X2, fill=X1))+ 
+    geom_bar(stat = "identity")+ #Barplot según el número de veces que se repiten los trigamas
+    coord_flip()+ #Barras horizontales
+  theme(legend.position="none")  #Quitar leyenda
+```
+
+
+
+
+# Medida de asociación
+
+```{r}
+palabras_correlacion <- tidy_tuits %>%
+  group_by(word) %>% #Agrupar por palabra
+  filter(n() >= 5) %>% #Tomar las que se repiten más de 5 veces
+  pairwise_cor(word,
+               replyToSN,
+               sort = TRUE) #Calcular correlación entre palabras
+head(subset(palabras_correlacion,item1=='alcalde'),10) #Ver correlaciones con la palabra alcalde
+
+
+```
+```{r}
+palabras_correlacion %>%
+  filter(item1 %in% c("jorgeivanospina",
+                      "cali",
+                      "movilidad",
+                      "salud",
+                      "fiscaliacol",
+                      "trabajo",
+                      "transporte",
+                      "robo",
+                      "corrupción",
+                      "inseguridad",
+                      "movilidadcali",
+                      "carro")) %>%  #Palabras de las que se graficarán las correlaciones
+  group_by(item1) %>%
+  top_n(5) %>%
+  mutate(item2 = reorder(item2, correlation)) %>% #Reordenar el dataframe
+  ggplot(aes(item2, correlation)) + #Generar grafica
+  geom_bar(stat = "identity") +  #Generar barras
+  facet_wrap(~ item1, scales = "free") + #cada grupo genera la producción de un gráfico
+  coord_flip() #Barras horizontales
+```
+#Correlacion entre más de dos palabras
+
+```{r}
+cali<-palabras_correlacion %>%filter(item1 %in% c("huecos")  )
+alcalde<-palabras_correlacion %>%filter(item1 %in% c("inseguridad")  )
+alcaldecali<-inner_join(alcalde,cali, by='item2')
+head(alcaldecali,10)
+```
+
+
+
+# Análisis de solo CALI
+
+
+```{r}
+ordcali<-subset(tidy_tuits,zona=='Cali') %>% count(word,sort=TRUE) #Tomar subconjunto de la Zona Cali
+head(ordcali,10)
+```
+```{r}
+ordcali2<-ordcali[-(1:6),] #Quitar primeras 6 filas
+ordcali2 %>% with(wordcloud(word, n, max.words = 200, random.order = FALSE, random.color = TRUE, colors=rainbow(5),scale=c(2,.5)))
+```
+
+### Sentimientos unicamente de Cali
+
+```{r}
+
+senti_cali<-subset(sentimientos_df, zona=='Cali')
+sentimientos_cali<-senti_cali[,18:27]
+
+barplot(
+  colSums(prop.table(sentimientos_cali[, 1:8])),
+  space = 0.2,
+  horiz = FALSE,
+  las = 1,
+  cex.names = 0.7,
+  col = brewer.pal(n = 8, name = "Set3"),
+  main = "Tweets dirigidos a la alcaldia de Cali",
+  sub = "Análisis realizado usando la libreria Syuzhet",
+  xlab="emociones", ylab = NULL)
+```
+
+
+
+
